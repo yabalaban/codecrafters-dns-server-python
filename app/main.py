@@ -54,14 +54,13 @@ def _encode_labels(value) -> bytearray:
 
 
 def _decode_labels(bytes: bytearray, offset: int) -> Tuple[str, int]:
-    s = ''
+    s = []
     while bytes[offset] != 0x00: 
         n = int(bytes[offset])
         offset += 1
-        s += bytes[offset: offset + n].decode("utf-8")
-        s += '.'
+        s.append(bytes[offset: offset + n].decode("utf-8"))
         offset += n 
-    return (s, offset)
+    return (".".join(s), offset)
 
 
 class DNSHeader:
@@ -324,7 +323,7 @@ class DNSMessage:
         self.header.ancount = len(answers)
 
     def payload(self) -> bytes:
-        bytes = bytearray(0)
+        bytes = bytearray()
         bytes.extend(self.header.payload())
         [bytes.extend(q.payload()) for q in self.questions]
         [bytes.extend(a.payload()) for a in self.answers]
