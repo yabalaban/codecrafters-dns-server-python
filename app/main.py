@@ -59,6 +59,7 @@ def _decode_labels(bytes: bytearray, offset: int) -> Tuple[str, int]:
         n = int(bytes[offset])
         offset += 1
         s += bytes[offset: offset + n].decode("utf-8")
+        s += '.'
         offset += n 
     return (s, offset)
 
@@ -175,6 +176,9 @@ class DNSHeader:
     def arcount(self, value: int):
         _16bit_set(self._payload, 10, value)
 
+    def __repr__(self) -> str:
+        return f"Header({self.id=}, {self.qr=}, {self.opcode=}, {self.aa=}, {self.tc=}, {self.rd=}, {self.ra=}, {self.z=}, {self.rcode=}, {self.qdcount=}, {self.ancount=}, {self.nscount=}, {self.arcount=})"
+
 
 class DNSRRType(Enum):
     # TYPE fields are used in resource records.  Note that these types are a
@@ -239,6 +243,9 @@ class DNSQuestion:
     def cls(self, cls: DNSRRClass):
         _16bit_set(self._payload, len(self._payload) - 2, cls.value)
 
+    def __repr__(self) -> str:
+        return f"Question({self.domain_name=}, {self.typ=}, {self.cls=})"
+
 
 class DNSAnswer:
     def __init__(self, payload: bytearray):
@@ -302,6 +309,10 @@ class DNSAnswer:
         self.length = len(value)
         self._payload[self._label_len + 10:] = value
 
+    def __repr__(self) -> str:
+        return f"Question({self.name=}, {self.typ=}, {self.cls=}, {self.ttl=}, {self.length=}, {self.data=})"
+
+
 @dataclass
 class DNSMessage:
 
@@ -334,19 +345,11 @@ class DNSMessage:
             question.domain_name = domain_name
             questions.append(question)
 
-        answers = []
-        for _ in range(header.ancount):
-            name, offset = _decode_labels(payload, offset)
-            offset += 1
-            answer = DNSAnswer(bytearray(payload[offset: offset + 10]))
-            offset += 10
-            answer.name = name
-            data = payload[offset]
-            answer.data = bytearray(payload[offset + 1: offset + data + 1])
-            offset += data + 1
-            answers.append(answer)
+        return DNSMessage(header, questions, []) 
+    
+    def __repr__(self) -> str:
+        return f"Message({self.header=}, {self.questions=}, {self.answers=})"
 
-        return DNSMessage(header, questions, answers) 
 
 def main():
 
@@ -358,6 +361,7 @@ def main():
             buf, source = udp_socket.recvfrom(512)
     
             requested = DNSMessage.from_bytes(buf)
+            print(requested)
 
             header = DNSHeader(bytearray(12))
             header.id = requested.header.id 
@@ -367,6 +371,7 @@ def main():
             header.rcode = 0 if requested.header.opcode == 0 else 4 
 
             questions = [] 
+            answers = [] 
             for q in requested.questions:
                 question = DNSQuestion(bytearray(4))
                 question.domain_name = q.domain_name
@@ -374,10 +379,8 @@ def main():
                 question.cls = DNSRRClass.IN
                 questions.append(question)
 
-            answers = [] 
-            for a in requested.answers:
                 answer = DNSAnswer(bytearray(10))
-                answer.name = a.name
+                answer.name = q.domain_name
                 answer.typ = DNSRRType.A
                 answer.cls = DNSRRClass.IN
                 answer.ttl = 60
@@ -386,7 +389,7 @@ def main():
 
             message = DNSMessage(header, questions, answers)
             response = message.payload()
-    
+            
             udp_socket.sendto(response, source)
         except Exception as e:
             print(f"Error receiving data: {e}")
