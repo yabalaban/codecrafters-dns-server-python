@@ -361,7 +361,6 @@ def main():
             buf, source = udp_socket.recvfrom(512)
     
             requested = DNSMessage.from_bytes(buf)
-            print(requested)
 
             header = DNSHeader(bytearray(12))
             header.id = requested.header.id 
