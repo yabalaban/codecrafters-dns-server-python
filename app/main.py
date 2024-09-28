@@ -1,3 +1,4 @@
+from enum import Enum
 import socket
 
 
@@ -137,12 +138,93 @@ class DNSHeader:
         _16bit_set(self._payload, 10, value)
 
 
+class DNSQuestionType(Enum):
+    A = 1       # a host address                
+    NS = 2      # an authoritative name server
+    MD = 3      # a mail destination (Obsolete - use MX)
+    MF = 4      # a mail forwarder (Obsolete - use MX)
+    CNAME = 5   # the canonical name for an alias
+    SOA = 6     # marks the start of a zone of authority
+    MB = 7      # a mailbox domain name (EXPERIMENTAL)
+    MG = 8      # a mail group member (EXPERIMENTAL)
+    MR = 9      # a mail rename domain name (EXPERIMENTAL)
+    NULL = 10   # a null RR (EXPERIMENTAL)
+    WKS = 11    # a well known service description
+    PTR = 12    # a domain name pointer
+    HINFO = 13  # host information
+    MINFO = 14  # mailbox or mail list information
+    MX = 15     # mail exchange
+    TXT = 16    # text strings
+
+
+class DNSQuestionClass(Enum):
+    IN = 1 # the Internet
+    CS = 2 # the CSNET class (Obsolete - used only for examples in some obsolete RFCs)
+    CH = 3 # the CHAOS class
+    HS = 4 # Hesiod [Dyer 87]
+
+
+class DNSQuestion:
+    def __init__(self, payload: bytearray):
+        self._payload = payload 
+
+    def payload(self) -> bytearray:
+        return bytearray(self._payload)
+
+    def labels(self) -> bytearray:
+        return self._payload[:-4]
+    
+    @property
+    def domain_name(self) -> str:
+        name = ''
+        offset = 0
+        while self._payload[offset] != 0x00: 
+            n = int(self._payload[offset])
+            offset += 1
+            name += self._payload[offset: offset + n].decode("utf-8")
+            offset += n 
+        return name
+    
+    @domain_name.setter
+    def domain_name(self, value: str) -> str:
+        ba = bytearray(0)
+        for label in value.split('.'):
+            ba.append(len(label))
+            ba.extend(bytes(label, encoding='utf-8'))
+        ba.append(0x00)
+        self._payload[:-4] = ba
+    
+    @property
+    def typ(self) -> DNSQuestionType:
+        return DNSQuestionType(_16bit_get(self._payload, len(self._payload) - 4))
+    
+    @typ.setter
+    def typ(self, ty: DNSQuestionType):
+        _16bit_set(self._payload, len(self._payload) - 4, ty.value)
+
+    @property
+    def cls(self) -> DNSQuestionClass:
+        return DNSQuestionClass(_16bit_get(self._payload, len(self._payload) - 2))
+    
+    @cls.setter
+    def cls(self, cls: DNSQuestionClass):
+        _16bit_set(self._payload, len(self._payload) - 2, cls.value)
+
+
 class DNSMessage:
     def __init__(self, header: DNSHeader):
         self._header = header 
+        self._questions = []
 
     def payload(self) -> bytes:
-        return self._header.payload()
+        bytes = bytearray(0)
+        bytes.extend(self._header.payload())
+        [bytes.extend(q.payload()) for q in self._questions]
+        return bytes
+
+    def add_question(self, question: DNSQuestion):
+        self._header.qdcount += 1
+        self._questions.append(question)
 
 
 def main():
@@ -155,10 +237,17 @@ def main():
             buf, source = udp_socket.recvfrom(512)
     
             header = DNSHeader(bytearray(12))
-            header.id = 0x04D2 # 1234
-            header.qr = 0x01
+            header.id = 1234
+            header.qr = 1
 
             message = DNSMessage(header)
+
+            question = DNSQuestion(bytearray(4))
+            question.domain_name = "codecrafters.io"
+            question.typ = DNSQuestionType.A
+            question.cls = DNSQuestionClass.IN
+            message.add_question(question)
+            
             response = message.payload()
     
             udp_socket.sendto(response, source)
