@@ -382,6 +382,7 @@ def main():
                 answer.cls = DNSRRClass.IN
                 answer.ttl = 60
                 answer.data = b'\x08\x08\x08\x08'
+                answers.append(answer)
 
             message = DNSMessage(header, questions, answers)
             response = message.payload()
