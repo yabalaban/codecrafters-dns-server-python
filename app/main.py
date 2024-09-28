@@ -1,5 +1,8 @@
-from enum import Enum
 import socket
+
+from dataclasses import dataclass
+from enum import Enum
+from typing import Tuple
 
 
 def _32bit_get(data: bytearray, offset: int) -> int:
@@ -42,7 +45,7 @@ def _bits_set(data: bytearray, offset: int, mask: int, shift: int, value: int):
 
 
 def _encode_labels(value) -> bytearray:
-    arr = bytearray(0)
+    arr = bytearray()
     for label in value.split('.'):
         arr.append(len(label))
         arr.extend(bytes(label, encoding='utf-8'))
@@ -50,14 +53,14 @@ def _encode_labels(value) -> bytearray:
     return arr
 
 
-def _decode_labels(bytes: bytearray, offset: int) -> str:
+def _decode_labels(bytes: bytearray, offset: int) -> Tuple[str, int]:
     s = ''
     while bytes[offset] != 0x00: 
         n = int(bytes[offset])
         offset += 1
         s += bytes[offset: offset + n].decode("utf-8")
         offset += n 
-    return s
+    return (s, offset)
 
 
 class DNSHeader:
@@ -214,7 +217,7 @@ class DNSQuestion:
     
     @property
     def domain_name(self) -> str:
-        return _decode_labels(self._payload, 0)
+        return _decode_labels(self._payload, 0)[0]
     
     @domain_name.setter
     def domain_name(self, value: str) -> str:
@@ -250,7 +253,7 @@ class DNSAnswer:
     
     @property
     def name(self) -> str:
-        return _decode_labels(self._payload, 0)
+        return _decode_labels(self._payload, 0)[0]
     
     @name.setter
     def name(self, value: str):
@@ -299,28 +302,51 @@ class DNSAnswer:
         self.length = len(value)
         self._payload[self._label_len + 10:] = value
 
-    
+@dataclass
 class DNSMessage:
-    def __init__(self, header: DNSHeader):
-        self._header = header 
-        self._questions = []
-        self._answers = []
+
+    def __init__(self, header: DNSHeader, questions: list[DNSQuestion], answers: list[DNSAnswer]):
+        self.header = header
+        self.questions = questions
+        self.answers = answers
+        self.header.qdcount = len(questions)
+        self.header.ancount = len(answers)
 
     def payload(self) -> bytes:
         bytes = bytearray(0)
-        bytes.extend(self._header.payload())
-        [bytes.extend(q.payload()) for q in self._questions]
-        [bytes.extend(a.payload()) for a in self._answers]
+        bytes.extend(self.header.payload())
+        [bytes.extend(q.payload()) for q in self.questions]
+        [bytes.extend(a.payload()) for a in self.answers]
         return bytes
+        
+    @staticmethod 
+    def from_bytes(payload: bytes):
+        offset = 0
+        header = DNSHeader(bytearray(payload[offset:offset + 12]))
+        offset += 12
+        
+        questions = []
+        for _ in range(header.qdcount):
+            domain_name, offset = _decode_labels(payload, offset)
+            offset += 1
+            question = DNSQuestion(bytearray(payload[offset: offset + 4]))
+            offset += 4
+            question.domain_name = domain_name
+            questions.append(question)
 
-    def add_question(self, question: DNSQuestion):
-        self._header.qdcount += 1
-        self._questions.append(question)
+        answers = []
+        for _ in range(header.ancount):
+            name, offset = _decode_labels(payload, offset)
+            offset += 1
+            answer = DNSAnswer(bytearray(payload[offset: offset + 10]))
+            offset += 10
+            answer.name = name
+            data = payload[offset]
+            answer.data = bytearray(payload[offset + 1: offset + data + 1])
+            offset += data + 1
+            answers.append(answer)
 
-    def add_answer(self, answer: DNSAnswer):
-        self._header.ancount += 1
-        self._answers.append(answer)
-
+        return DNSMessage(header, questions, answers) 
 
 def main():
 
@@ -331,31 +357,33 @@ def main():
         try:
             buf, source = udp_socket.recvfrom(512)
     
-            requested = DNSHeader(bytearray(buf[:12])) 
+            requested = DNSMessage(bytearray(buf))
+
             header = DNSHeader(bytearray(12))
-            header.id = requested.id 
+            header.id = requested.header.id 
             header.qr = 1
-            header.opcode = requested.opcode
-            header.rd = requested.rd
-            header.rcode = 0 if requested.opcode == 0 else 4 
+            header.opcode = requested.header.opcode
+            header.rd = requested.header.rd
+            header.rcode = 0 if requested.header.opcode == 0 else 4 
 
-            message = DNSMessage(header)
+            questions = [] 
+            for q in requested.questions:
+                question = DNSQuestion(bytearray(4))
+                question.domain_name = q.domain_name
+                question.typ = DNSRRType.A
+                question.cls = DNSRRClass.IN
+                questions.append(question)
 
-            question = DNSQuestion(bytearray(4))
-            question.domain_name = "codecrafters.io"
-            question.typ = DNSRRType.A
-            question.cls = DNSRRClass.IN
+            answers = [] 
+            for a in requested.answers:
+                answer = DNSAnswer(bytearray(10))
+                answer.name = a.name
+                answer.typ = DNSRRType.A
+                answer.cls = DNSRRClass.IN
+                answer.ttl = 60
+                answer.data = b'\x08\x08\x08\x08'
 
-            answer = DNSAnswer(bytearray(10))
-            answer.name = "codecrafters.io"
-            answer.typ = DNSRRType.A
-            answer.cls = DNSRRClass.IN
-            answer.ttl = 60
-            answer.data = b'\x08\x08\x08\x08'
-
-            message.add_question(question)
-            message.add_answer(answer)
-
+            message = DNSMessage(header, questions, answers)
             response = message.payload()
     
             udp_socket.sendto(response, source)
