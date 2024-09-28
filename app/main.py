@@ -341,7 +341,16 @@ def main():
             question.domain_name = "codecrafters.io"
             question.typ = DNSRRType.A
             question.cls = DNSRRClass.IN
+
+            answer = DNSAnswer(bytearray(10))
+            answer.name = "codecrafters.io"
+            answer.typ = DNSRRType.A
+            answer.cls = DNSRRClass.IN
+            answer.ttl = 60
+            answer.data = b'\x08\x08\x08\x08'
+
             message.add_question(question)
+            message.add_answer(answer)
 
             response = message.payload()
     
