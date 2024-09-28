@@ -56,6 +56,9 @@ def _encode_labels(value) -> bytearray:
 def _decode_labels(bytes: bytearray, offset: int) -> Tuple[str, int]:
     s = []
     while bytes[offset] != 0x00: 
+        if bytes[offset] & 0b11000000 == 0b11000000:
+            offset = _16bit_get(bytes, offset) & 0x3FFF
+            continue 
         n = int(bytes[offset])
         offset += 1
         s.append(bytes[offset: offset + n].decode("utf-8"))
