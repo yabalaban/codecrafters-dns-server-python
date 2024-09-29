@@ -350,7 +350,18 @@ class DNSMessage:
             question.domain_name = domain_name
             questions.append(question)
 
-        return DNSMessage(header, questions, []) 
+        answers = []
+        for _ in range(header.ancount):
+            name, offset = _decode_labels(payload, offset)
+            offset += 1
+            answer = DNSAnswer(bytearray(payload[offset: offset + 10]))
+            offset += 10
+            answer.name = name
+            len = payload[offset - 1]
+            answer.data = bytearray(payload[offset: offset + len])
+            answers.append(answer)
+
+        return DNSMessage(header, questions, answers) 
     
     def __repr__(self) -> str:
         return f"Message({self.header=}, {self.questions=}, {self.answers=})"
@@ -372,14 +383,24 @@ def main():
         try:
             buf, source = udp_socket.recvfrom(512)
             received = DNSMessage.from_bytes(buf)
-            received.header.ra = 1
-            print("> ", received)
-            udp_resolver.sendto(received.payload(), resolver)
-            res_buf, _ = udp_resolver.recvfrom(512)
-            resolved = DNSMessage.from_bytes(res_buf)
-            print("< ", resolved)
 
-            udp_socket.sendto(resolved.payload(), source)
+            ans = []
+            header_id = received.header.id
+            received.header.qdcount = 1
+            for q in received.questions:
+                received.header.id = random.randrange(0, 0xFFFF)
+                message = DNSMessage(received.header, [q], [])
+                udp_resolver.sendto(message.payload(), resolver)
+                res_buf, _ = udp_resolver.recvfrom(512)
+                resolved = DNSMessage.from_bytes(res_buf)
+                ans.extend(resolved.answers)
+    
+            received.header.id = header_id
+            received.header.qr = 1
+            received.header.rcode = 0 if received.header.opcode == 0 else 4
+            received.header.qdcount = len(received.questions)
+            message = DNSMessage(received.header, received.questions, ans)
+            udp_socket.sendto(message.payload(), source)
 
 
         except Exception as e:
