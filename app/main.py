@@ -360,32 +360,27 @@ def main():
 
     udp_socket = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
     udp_socket.bind(("127.0.0.1", 2053))
+    udp_resolver = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
     
-    fragments = defaultdict(int)
-    sources = {}
-
-    if '--resolver' not in sys.argv:
-        assert('haha')
-
-    ip, port = sys.argv[-1].split(":")
-    resolver = (ip, int(port))
+    if '--resolver' in sys.argv:
+        ip, port = sys.argv[-1].split(":")
+        resolver = (ip, int(port))
+    else:
+        resolver = None
 
     while True:
         try:
             buf, source = udp_socket.recvfrom(512)
-    
             received = DNSMessage.from_bytes(buf)
-            if received.header.qr:
-                orig_id = fragments[received.header.id]
-                source = sources[orig_id]
-                received.header.id = orig_id
-                udp_socket.sendto(received.payload(), source)
-            else: 
-                orig_id = received.header.id
-                received.header.id = random.randrange(0, 0xFFFF)
-                sources[orig_id] = source
-                fragments[received.header.id] = orig_id
-                udp_socket.sendto(received.payload(), resolver)
+            received.header.ra = 1
+            print("> ", received)
+            udp_resolver.sendto(received.payload(), resolver)
+            res_buf, _ = udp_resolver.recvfrom(512)
+            resolved = DNSMessage.from_bytes(res_buf)
+            print("< ", resolved)
+
+            udp_socket.sendto(resolved.payload(), source)
+
 
         except Exception as e:
             print(f"Error receiving data: {e}")
