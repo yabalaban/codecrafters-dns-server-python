@@ -1,4 +1,7 @@
+from collections import defaultdict
+import random
 import socket
+import sys
 
 from dataclasses import dataclass
 from enum import Enum
@@ -358,40 +361,32 @@ def main():
     udp_socket = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
     udp_socket.bind(("127.0.0.1", 2053))
     
+    fragments = defaultdict(int)
+    sources = {}
+
+    if '--resolver' not in sys.argv:
+        assert('haha')
+
+    ip, port = sys.argv[-1].split(":")
+    resolver = (ip, int(port))
+
     while True:
         try:
             buf, source = udp_socket.recvfrom(512)
     
-            requested = DNSMessage.from_bytes(buf)
+            received = DNSMessage.from_bytes(buf)
+            if received.header.qr:
+                orig_id = fragments[received.header.id]
+                source = sources[orig_id]
+                received.header.id = orig_id
+                udp_socket.sendto(received.payload(), source)
+            else: 
+                orig_id = received.header.id
+                received.header.id = random.randrange(0, 0xFFFF)
+                sources[orig_id] = source
+                fragments[received.header.id] = orig_id
+                udp_socket.sendto(received.payload(), resolver)
 
-            header = DNSHeader(bytearray(12))
-            header.id = requested.header.id 
-            header.qr = 1
-            header.opcode = requested.header.opcode
-            header.rd = requested.header.rd
-            header.rcode = 0 if requested.header.opcode == 0 else 4 
-
-            questions = [] 
-            answers = [] 
-            for q in requested.questions:
-                question = DNSQuestion(bytearray(4))
-                question.domain_name = q.domain_name
-                question.typ = DNSRRType.A
-                question.cls = DNSRRClass.IN
-                questions.append(question)
-
-                answer = DNSAnswer(bytearray(10))
-                answer.name = q.domain_name
-                answer.typ = DNSRRType.A
-                answer.cls = DNSRRClass.IN
-                answer.ttl = 60
-                answer.data = b'\x08\x08\x08\x08'
-                answers.append(answer)
-
-            message = DNSMessage(header, questions, answers)
-            response = message.payload()
-            
-            udp_socket.sendto(response, source)
         except Exception as e:
             print(f"Error receiving data: {e}")
             break
